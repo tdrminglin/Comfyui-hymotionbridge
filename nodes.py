@@ -126,9 +126,8 @@ class HYMotionToSCAILBridge:
             "char_count": 1 # 告知 SCAIL 这是一个单人动作
         },)
 # 记得在 NODE_CLASS_MAPPINGS 中注册
-
 # ============================================================================
-# Node: HYMotion to NLF Bridge V6 (With Head/Face Projection)
+# Node: HYMotion to NLF Bridge V7 (Stiff Head & Dynamic Face)
 # ============================================================================
 
 class HYMotionToNLFBridge:
@@ -139,13 +138,15 @@ class HYMotionToNLFBridge:
                 "motion_data": ("HYMOTION_DATA",),
                 "sample_index": ("INT", {"default": 0, "min": 0, "max": 64}),
                 "scale": ("FLOAT", {"default": 1000.0, "min": 1.0, "max": 2000.0, "step": 10.0, "tooltip": "1000 converts meters to mm."}),
-                "z_offset": ("FLOAT", {"default": 2500.0, "min": 0.0, "max": 10000.0, "step": 100.0, "tooltip": "Distance in mm. Determines perspective strength."}),
+                "z_offset": ("FLOAT", {"default": 2500.0, "min": 0.0, "max": 10000.0, "step": 100.0, "tooltip": "Distance in mm. Determines perspective."}),
                 "auto_center": ("BOOLEAN", {"default": True, "tooltip": "Center the first frame at (0,0,0)"}),
-                "rotation_y": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 5.0, "tooltip": "0 = Face Camera. Rotates the 3D model."}),
+                "rotation_y": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 5.0, "tooltip": "0 = Face Camera. Rotates the whole body."}),
+                # 新增核心功能：锁定头部
+                "stiff_head": ("BOOLEAN", {"default": False, "tooltip": "Lock head rotation to align with upper spine (removes independent head movement)."}),
             },
             "optional": {
-                "width": ("INT", {"default": 512, "tooltip": "Canvas width for 2D projection"}),
-                "height": ("INT", {"default": 896, "tooltip": "Canvas height for 2D projection"}),
+                "width": ("INT", {"default": 512}),
+                "height": ("INT", {"default": 896}),
             }
         }
 
@@ -154,7 +155,7 @@ class HYMotionToNLFBridge:
     FUNCTION = "convert"
     CATEGORY = "HY-Motion/Bridge"
 
-    def convert(self, motion_data, sample_index, scale, z_offset, auto_center, rotation_y, width=512, height=896):
+    def convert(self, motion_data, sample_index, scale, z_offset, auto_center, rotation_y, stiff_head, width=512, height=896):
         import torch
         import numpy as np
 
@@ -165,17 +166,34 @@ class HYMotionToNLFBridge:
         idx = min(sample_index, kpts.shape[0] - 1)
         poses = kpts[idx].clone() # [Frames, 22, 3]
         
-        # --- 1. 3D Processing ---
+        # --- 1. Pre-Processing (Auto Center & Stiff Head) ---
         
         if auto_center:
             root_pos = poses[0, 0, :].clone()
             poses = poses - root_pos
 
+        # Apply Stiff Head (Lock Head to Spine3 -> Neck vector)
+        # SMPL Indices: 9: Spine3, 12: Neck, 15: Head
+        if stiff_head:
+            # Vector from Spine3 to Neck
+            spine_vec = poses[:, 12, :] - poses[:, 9, :] # [F, 3]
+            # Normalize
+            spine_norm = torch.norm(spine_vec, dim=1, keepdim=True) + 1e-6
+            spine_dir = spine_vec / spine_norm
+            
+            # Calculate original neck length (Neck -> Head)
+            orig_head_vec = poses[:, 15, :] - poses[:, 12, :]
+            neck_len = torch.norm(orig_head_vec, dim=1, keepdim=True)
+            
+            # Force Head position to be extension of spine
+            poses[:, 15, :] = poses[:, 12, :] + spine_dir * neck_len
+
+        # --- 2. Global Transforms (Scale & Rotation) ---
+        
         poses *= scale
         
-        # Apply Rotation (Y-axis)
-        # SMPL defaults facing +Z. We want 0 deg to face camera (-Z).
-        theta_deg = rotation_y + 180.0
+        # Rotation Y
+        theta_deg = rotation_y + 180.0 # SMPL faces +Z, we rotate to face -Z (Camera)
         theta_rad = np.radians(theta_deg)
         cos_t = np.cos(theta_rad)
         sin_t = np.sin(theta_rad)
@@ -185,18 +203,18 @@ class HYMotionToNLFBridge:
         poses[:, :, 0] = x * cos_t - z * sin_t
         poses[:, :, 2] = x * sin_t + z * cos_t
         
-        # Coordinate Conversion (Y-up -> Y-down)
+        # Coordinate Conversion (Y-up -> Y-down for screen)
         poses[:, :, 1] = -poses[:, :, 1]
         
         # Z Offset
         poses[:, :, 2] += z_offset
         
-        # Padding for NLF (22 -> 24)
+        # Padding (22 -> 24)
         frames, num_joints, dims = poses.shape
         if num_joints == 22:
             padding = torch.zeros((frames, 2, dims), device=poses.device, dtype=poses.dtype)
-            padding[:, 0, :] = poses[:, 20, :] # L_Hand from L_Wrist
-            padding[:, 1, :] = poses[:, 21, :] # R_Hand from R_Wrist
+            padding[:, 0, :] = poses[:, 20, :] # L_Hand
+            padding[:, 1, :] = poses[:, 21, :] # R_Hand
             poses_final = torch.cat([poses, padding], dim=1)
         else:
             poses_final = poses
@@ -208,58 +226,59 @@ class HYMotionToNLFBridge:
             joints_list.append(frame_pose)
         nlf_output = {'joints3d_nonparam': [joints_list]}
 
-        # --- 2. Generate Projected DWPose (With FACE) ---
+        # --- 3. Dynamic Face Projection (DWPose) ---
         
-        # Mapping SMPL(22) to OpenPose(18)
-        # SMPL: 0:Pelvis, 1:L_Hip, 2:R_Hip, 3:Spine1, 4:L_Knee, 5:R_Knee, 6:Spine2, 7:L_Ank, 8:R_Ank, 9:Spine3, 
-        #       10:L_Foot, 11:R_Foot, 12:Neck, 13:L_Collar, 14:R_Collar, 15:Head, 16:L_Sho, 17:R_Sho, 
-        #       18:L_Elb, 19:R_Elb, 20:L_Wri, 21:R_Wri
-        
-        # OpenPose 18: 0:Nose, 1:Neck, 2:RSho, 3:RElb, 4:RWri, 5:LSho, 6:LElb, 7:LWri, 
-        #              8:RHip, 9:RKnee, 10:RAnk, 11:LHip, 12:LKnee, 13:LAnk, 
-        #              14:REye, 15:LEye, 16:REar, 17:LEar
-        
-        # Simple pinhole projection
-        focal = max(width, height) # Approximate focal length
+        focal = max(width, height)
         cx, cy = width / 2, height / 2
         
         def project(p3d):
-            # p3d: [..., 3] (x, y, z)
             x, y, z = p3d[..., 0], p3d[..., 1], p3d[..., 2]
-            # Avoid div by zero
-            z = torch.clamp(z, min=10.0)
+            z = torch.clamp(z, min=10.0) # Avoid clipping
             u = (x / z) * focal + cx
             v = (y / z) * focal + cy
             return torch.stack([u, v], dim=-1)
 
-        # Generate fake face points in 3D relative to Head(15)
-        # We assume poses is currently in Camera Space (Y-down, X-right)
-        # Head is roughly at center.
-        head_3d = poses[:, 15, :]
+        # Calculate Local Coordinate System for Head
+        # Up Vector: Neck(12) -> Head(15)
+        v_up = poses[:, 15, :] - poses[:, 12, :]
+        v_up = v_up / (torch.norm(v_up, dim=1, keepdim=True) + 1e-6)
         
-        # Define offsets (in mm)
-        face_scale = scale * 0.06 # Adjust based on body scale
+        # Right Vector: Estimated from Shoulders L(16) -> R(17)
+        # Note: In Y-down space (after flip), L is usually +X side relative to body? 
+        # Let's rely on Shoulders to define the plane.
+        # SMPL 16: L_Sho, 17: R_Sho.
+        v_shoulders = poses[:, 17, :] - poses[:, 16, :] # Vector pointing roughly Right
+        v_shoulders = v_shoulders / (torch.norm(v_shoulders, dim=1, keepdim=True) + 1e-6)
         
-        # Note: In screen view (viewer looking at screen):
-        # Right Eye (User's Right) is +X, Left Eye is -X. 
-        # But OpenPose defines R_Eye as the person's Right Eye.
-        # If person faces camera: Person's Right Eye is on Viewer's Left (-X).
+        # Forward Vector: Cross(Up, Right) -> Points out of chest (or back depending on coord sys)
+        # In Y-down system: Up is negative Y direction. Right is +X. Forward should be -Z (towards camera).
+        v_fwd = torch.cross(v_up, v_shoulders, dim=1)
+        v_fwd = v_fwd / (torch.norm(v_fwd, dim=1, keepdim=True) + 1e-6)
         
-        # 3D Offsets
-        off_nose   = torch.tensor([0.0, 0.0, -face_scale*0.5], device=poses.device) # Slightly forward (negative Z is closer)
-        off_r_eye  = torch.tensor([-face_scale*0.6, -face_scale*0.3, 0.0], device=poses.device)
-        off_l_eye  = torch.tensor([ face_scale*0.6, -face_scale*0.3, 0.0], device=poses.device)
-        off_r_ear  = torch.tensor([-face_scale*1.5, 0.0, face_scale*0.5], device=poses.device)
-        off_l_ear  = torch.tensor([ face_scale*1.5, 0.0, face_scale*0.5], device=poses.device)
+        # Re-orthogonalize Right
+        v_right = torch.cross(v_fwd, v_up, dim=1)
         
-        # Apply offsets to all frames
-        nose_3d = head_3d + off_nose
-        r_eye_3d = head_3d + off_r_eye
-        l_eye_3d = head_3d + off_l_eye
-        r_ear_3d = head_3d + off_r_ear
-        l_ear_3d = head_3d + off_l_ear
+        # Face Scale
+        face_s = scale * 0.06
         
-        # Construct full 18-point skeleton in 3D first
+        # Construct Face Points using Basis Vectors
+        # Head Center
+        p_head = poses[:, 15, :]
+        
+        # Offsets (Forward is v_fwd, Right is v_right, Up is v_up)
+        # Nose: slightly forward
+        nose_3d = p_head + v_fwd * (face_s * 0.5) + v_up * (face_s * -0.2)
+        
+        # Eyes: Up/Down relative to head, Left/Right relative to head
+        # R_Eye (Person's Right) -> -v_right
+        r_eye_3d = p_head + v_fwd * (face_s * 0.2) - v_right * (face_s * 0.6) + v_up * (face_s * -0.3)
+        l_eye_3d = p_head + v_fwd * (face_s * 0.2) + v_right * (face_s * 0.6) + v_up * (face_s * -0.3)
+        
+        # Ears: Back and Sides
+        r_ear_3d = p_head - v_fwd * (face_s * 0.5) - v_right * (face_s * 1.5)
+        l_ear_3d = p_head - v_fwd * (face_s * 0.5) + v_right * (face_s * 1.5)
+
+        # Assemble OpenPose 18 Skeleton in 3D
         frames_cnt = poses.shape[0]
         op_3d = torch.zeros((frames_cnt, 18, 3), device=poses.device)
         
@@ -282,32 +301,31 @@ class HYMotionToNLFBridge:
         op_3d[:, 16] = r_ear_3d
         op_3d[:, 17] = l_ear_3d
         
-        # Project to 2D
-        op_2d = project(op_3d) # [Frames, 18, 2] in pixels
+        # Project
+        op_2d = project(op_3d) # [F, 18, 2]
         
-        # Normalize to 0.0 - 1.0 (DWPose Standard)
+        # Normalize
         op_2d[:, :, 0] /= width
         op_2d[:, :, 1] /= height
         
-        # Convert to numpy list structure for DWPose
         op_2d_np = op_2d.cpu().numpy()
         
+        # Pack DWPose
         dw_list = []
         subset_base = np.arange(18, dtype=np.float32)
-        
         for i in range(frames_cnt):
-            candidate = op_2d_np[i] # [18, 2]
+            candidate = op_2d_np[i]
+            # Simple visibility check: if Z < 0 (behind camera), we could hide it, 
+            # but simple projection logic above kept Z>10. 
+            # Let's assume valid.
             
-            # Format: 'bodies': {'candidate': [N, 18, 2], 'subset': [N, 18]}
-            # N=1 person
             body_entry = {
-                'candidate': candidate[None, ...], # [1, 18, 2]
-                'subset': subset_base[None, ...]   # [1, 18]
+                'candidate': candidate[None, ...],
+                'subset': subset_base[None, ...]
             }
-            
             frame_dict = {
                 'bodies': body_entry,
-                'hands': np.zeros((1, 21, 2), dtype=np.float32), # Optional: could project hands too
+                'hands': np.zeros((1, 21, 2), dtype=np.float32),
                 'faces': np.zeros((1, 68, 2), dtype=np.float32),
                 'canvas_width': width,
                 'canvas_height': height
