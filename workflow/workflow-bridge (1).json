@@ -1,0 +1,765 @@
+{
+  "id": "49fbd9ce-342c-4413-82b6-296fb9633dc5",
+  "revision": 0,
+  "last_node_id": 23,
+  "last_link_id": 24,
+  "nodes": [
+    {
+      "id": 4,
+      "type": "HYMotionLoadNetwork",
+      "pos": [
+        -4937.065352819321,
+        -3745.3979302512926
+      ],
+      "size": [
+        390.2604166666667,
+        58
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "network",
+          "type": "HYMOTION_NET",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionLoadNetwork"
+      },
+      "widgets_values": [
+        "HY-Motion-1.0"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "HYMotionEncodeText",
+      "pos": [
+        -4930.173696295045,
+        -3534.8740278243913
+      ],
+      "size": [
+        333.33333333333337,
+        88
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "llm",
+          "type": "HYMOTION_LLM",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "name": "conditioning",
+          "type": "HYMOTION_COND",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionEncodeText"
+      },
+      "widgets_values": [
+        "A person collapses forward onto their knees, slumps their upper body down, then slowly pushes themselves back up with effort."
+      ]
+    },
+    {
+      "id": 14,
+      "type": "HYMotionPreviewAnimation",
+      "pos": [
+        -4495.588741966641,
+        -3452.0052944818926
+      ],
+      "size": [
+        426.6666666666667,
+        668.4
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "motion_data",
+          "type": "HYMOTION_DATA",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "motion_data",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionPreviewAnimation"
+      },
+      "widgets_values": [
+        0,
+        ""
+      ]
+    },
+    {
+      "id": 6,
+      "type": "HYMotionPreview",
+      "pos": [
+        -4412.6519888713165,
+        -3673.100706543407
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "motion_data",
+          "type": "HYMOTION_DATA",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionPreview"
+      },
+      "widgets_values": [
+        0,
+        5,
+        512
+      ]
+    },
+    {
+      "id": 7,
+      "type": "PreviewImage",
+      "pos": [
+        -3370.6860041204873,
+        -3673.576787348054
+      ],
+      "size": [
+        311.640625,
+        1036.484375
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 6
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 15,
+      "type": "HYMotionLoadLLM",
+      "pos": [
+        -5413.870534770547,
+        -3507.0297606164486
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "llm",
+          "type": "HYMOTION_LLM",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionLoadLLM"
+      },
+      "widgets_values": [
+        "int4"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "HYMotionToNLFBridge",
+      "pos": [
+        -4408.124308078525,
+        -3980.1897976460045
+      ],
+      "size": [
+        271.095703125,
+        222
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "motion_data",
+          "type": "HYMOTION_DATA",
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "nlf_poses",
+          "type": "NLFPRED",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "dummy_dw_poses",
+          "type": "DWPOSES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionToNLFBridge"
+      },
+      "widgets_values": [
+        0,
+        1000,
+        2500,
+        true,
+        30,
+        512,
+        896
+      ]
+    },
+    {
+      "id": 20,
+      "type": "RenderNLFPoses",
+      "pos": [
+        -3518.214789958013,
+        -4125.201014784151
+      ],
+      "size": [
+        270,
+        242
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "nlf_poses",
+          "name": "nlf_poses",
+          "type": "NLFPRED",
+          "link": 20
+        },
+        {
+          "label": "dw_poses",
+          "name": "dw_poses",
+          "shape": 7,
+          "type": "DWPOSES",
+          "link": null
+        },
+        {
+          "label": "ref_dw_pose",
+          "name": "ref_dw_pose",
+          "shape": 7,
+          "type": "DWPOSES",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            21
+          ]
+        },
+        {
+          "label": "mask",
+          "name": "mask",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "aux_id": "kijai/ComfyUI-SCAIL-Pose",
+        "Node name for S&R": "RenderNLFPoses",
+        "cnr_id": "comfyui-scail-pose",
+        "ver": "93059f0fe4ea3881c0d6ec0e327e5d920554277d",
+        "ue_properties": {
+          "version": "7.5.2",
+          "widget_ue_connectable": {
+            "width": true,
+            "height": true
+          },
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        512,
+        896,
+        true,
+        true,
+        "gpu",
+        true,
+        "taichi"
+      ]
+    },
+    {
+      "id": 21,
+      "type": "HYMotionToSCAILBridge",
+      "pos": [
+        -4377.197320004873,
+        -4352.9858209644735
+      ],
+      "size": [
+        270,
+        154
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "motion_data",
+          "type": "HYMOTION_DATA",
+          "link": 24
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose_sequence",
+          "type": "SCAIL_POSE_SEQUENCE",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionToSCAILBridge"
+      },
+      "widgets_values": [
+        0,
+        300,
+        0,
+        100,
+        800
+      ]
+    },
+    {
+      "id": 19,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        -2881.6521076784697,
+        -4112.773497144998
+      ],
+      "size": [
+        282.5345831802035,
+        807.4355205653562
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 21
+        },
+        {
+          "label": "音频",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "批次管理",
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文件名",
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine",
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "0a75c7958fe320efcb052f1d9f8451fd20c730a8",
+        "ue_properties": {
+          "version": "7.5.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "onetotall_pose",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "paused": false,
+          "hidden": false,
+          "params": {
+            "score": "0",
+            "filename": "onetotall_pose_00001.mp4",
+            "workflow": "onetotall_pose_00001.png",
+            "fullpath": "E:\\ai_models\\ComfyUI-aki-v1.2\\output\\onetotall_pose_00001.mp4",
+            "format": "video/h264-mp4",
+            "subfolder": "",
+            "label": "Normal",
+            "type": "output",
+            "frame_rate": 16
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "HYMotionGenerate",
+      "pos": [
+        -5141.659876260163,
+        -3154.674253175328
+      ],
+      "size": [
+        385.1041666666667,
+        174
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "network",
+          "type": "HYMOTION_NET",
+          "link": 3
+        },
+        {
+          "name": "conditioning",
+          "type": "HYMOTION_COND",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "motion_data",
+          "type": "HYMOTION_DATA",
+          "links": [
+            5,
+            15,
+            17,
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "HYMotionGenerate"
+      },
+      "widgets_values": [
+        5,
+        110465853,
+        "randomize",
+        5,
+        1
+      ]
+    },
+    {
+      "id": 23,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        -2937.4064986797134,
+        -4574.739773445269
+      ],
+      "size": [
+        282.5345831802035,
+        807.4355205653562
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 23
+        },
+        {
+          "label": "音频",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "批次管理",
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文件名",
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine",
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "0a75c7958fe320efcb052f1d9f8451fd20c730a8",
+        "ue_properties": {
+          "version": "7.5.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": {
+        "frame_rate": 16,
+        "loop_count": 0,
+        "filename_prefix": "onetotall_pose",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "paused": false,
+          "hidden": false,
+          "params": {
+            "score": "0",
+            "filename": "onetotall_pose_00002.mp4",
+            "workflow": "onetotall_pose_00002.png",
+            "fullpath": "E:\\ai_models\\ComfyUI-aki-v1.2\\output\\onetotall_pose_00002.mp4",
+            "format": "video/h264-mp4",
+            "subfolder": "",
+            "label": "Normal",
+            "type": "output",
+            "frame_rate": 16
+          }
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "SCAILPoseRenderer",
+      "pos": [
+        -3522.941347076728,
+        -4446.461666061628
+      ],
+      "size": [
+        270,
+        154
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pose_sequence",
+          "type": "SCAIL_POSE_SEQUENCE",
+          "link": 22
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose_images",
+          "type": "IMAGE",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "ckinpdx/ComfyUI-SCAIL-AudioReactive",
+        "Node name for S&R": "SCAILPoseRenderer",
+        "ver": "cccdbe69f9b1ab840734db15115ea9187a19f869",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.1"
+        }
+      },
+      "widgets_values": [
+        512,
+        896,
+        false,
+        30,
+        4
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    }
+  ],
+  "links": [
+    [
+      3,
+      4,
+      0,
+      5,
+      0,
+      "HYMOTION_NET"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
+      "HYMOTION_DATA"
+    ],
+    [
+      6,
+      6,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      10,
+      10,
+      0,
+      5,
+      1,
+      "HYMOTION_COND"
+    ],
+    [
+      15,
+      5,
+      0,
+      14,
+      0,
+      "HYMOTION_DATA"
+    ],
+    [
+      16,
+      15,
+      0,
+      10,
+      0,
+      "HYMOTION_LLM"
+    ],
+    [
+      17,
+      5,
+      0,
+      17,
+      0,
+      "HYMOTION_DATA"
+    ],
+    [
+      20,
+      17,
+      0,
+      20,
+      0,
+      "NLFPRED"
+    ],
+    [
+      21,
+      20,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ],
+    [
+      22,
+      21,
+      0,
+      22,
+      0,
+      "SCAIL_POSE_SEQUENCE"
+    ],
+    [
+      23,
+      22,
+      0,
+      23,
+      0,
+      "IMAGE"
+    ],
+    [
+      24,
+      5,
+      0,
+      21,
+      0,
+      "HYMOTION_DATA"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.30735605491428325,
+      "offset": [
+        7067.095444208733,
+        4743.488477960396
+      ]
+    },
+    "frontendVersion": "1.30.6",
+    "workflowRendererVersion": "LG",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

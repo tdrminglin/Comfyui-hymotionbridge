@@ -8,5 +8,5 @@ git pull origin main --allow-unrelated-histories
 #git push -u origin main
 
 
-#git push --set-upstream origin master
+git push --set-upstream origin master
 #git push
