@@ -128,7 +128,7 @@ class HYMotionToSCAILBridge:
 # 记得在 NODE_CLASS_MAPPINGS 中注册
 
 # ============================================================================
-# Node: HYMotion to NLF Bridge V5 (Rotation Control)
+# Node: HYMotion to NLF Bridge V6 (With Head/Face Projection)
 # ============================================================================
 
 class HYMotionToNLFBridge:
@@ -139,24 +139,24 @@ class HYMotionToNLFBridge:
                 "motion_data": ("HYMOTION_DATA",),
                 "sample_index": ("INT", {"default": 0, "min": 0, "max": 64}),
                 "scale": ("FLOAT", {"default": 1000.0, "min": 1.0, "max": 2000.0, "step": 10.0, "tooltip": "1000 converts meters to mm."}),
-                "z_offset": ("FLOAT", {"default": 2500.0, "min": 0.0, "max": 10000.0, "step": 100.0, "tooltip": "Distance in mm. 2500 = 2.5 meters."}),
+                "z_offset": ("FLOAT", {"default": 2500.0, "min": 0.0, "max": 10000.0, "step": 100.0, "tooltip": "Distance in mm. Determines perspective strength."}),
                 "auto_center": ("BOOLEAN", {"default": True, "tooltip": "Center the first frame at (0,0,0)"}),
-                # 核心修正：角度控制
-                "rotation_y": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 5.0, "tooltip": "Rotation in degrees. 0 = Face Camera."}),
+                "rotation_y": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0, "step": 5.0, "tooltip": "0 = Face Camera. Rotates the 3D model."}),
             },
             "optional": {
-                "width": ("INT", {"default": 512}),
-                "height": ("INT", {"default": 896}),
+                "width": ("INT", {"default": 512, "tooltip": "Canvas width for 2D projection"}),
+                "height": ("INT", {"default": 896, "tooltip": "Canvas height for 2D projection"}),
             }
         }
 
     RETURN_TYPES = ("NLFPRED", "DWPOSES")
-    RETURN_NAMES = ("nlf_poses", "dummy_dw_poses")
+    RETURN_NAMES = ("nlf_poses", "projected_dw_poses")
     FUNCTION = "convert"
     CATEGORY = "HY-Motion/Bridge"
 
     def convert(self, motion_data, sample_index, scale, z_offset, auto_center, rotation_y, width=512, height=896):
-
+        import torch
+        import numpy as np
 
         kpts = motion_data.output_dict.get("keypoints3d")
         if kpts is None:
@@ -165,74 +165,156 @@ class HYMotionToNLFBridge:
         idx = min(sample_index, kpts.shape[0] - 1)
         poses = kpts[idx].clone() # [Frames, 22, 3]
         
-        # 1. Auto-Center (归零)
+        # --- 1. 3D Processing ---
+        
         if auto_center:
             root_pos = poses[0, 0, :].clone()
             poses = poses - root_pos
 
-        # 2. Scale (米 -> 毫米)
         poses *= scale
         
-        # 3. Apply Rotation (Y-axis)
-        # SMPL 默认面朝 +Z。为了让它面朝观众(相机)，需要旋转 180 度指向 -Z。
-        # 因此基础旋转是 180 度，再加上用户的输入角度。
-        
+        # Apply Rotation (Y-axis)
+        # SMPL defaults facing +Z. We want 0 deg to face camera (-Z).
         theta_deg = rotation_y + 180.0
         theta_rad = np.radians(theta_deg)
-        
         cos_t = np.cos(theta_rad)
         sin_t = np.sin(theta_rad)
         
-        # 旋转公式 (绕 Y 轴):
-        # x' = x * cos - z * sin
-        # z' = x * sin + z * cos
         x = poses[:, :, 0].clone()
         z = poses[:, :, 2].clone()
-        
         poses[:, :, 0] = x * cos_t - z * sin_t
         poses[:, :, 2] = x * sin_t + z * cos_t
         
-        # 4. Coordinate Conversion (SMPL Y-up -> Camera Y-down)
+        # Coordinate Conversion (Y-up -> Y-down)
         poses[:, :, 1] = -poses[:, :, 1]
         
-        # 5. Z Offset (推远)
+        # Z Offset
         poses[:, :, 2] += z_offset
         
-        # 6. Padding (22 -> 24 joints)
+        # Padding for NLF (22 -> 24)
         frames, num_joints, dims = poses.shape
         if num_joints == 22:
             padding = torch.zeros((frames, 2, dims), device=poses.device, dtype=poses.dtype)
-            padding[:, 0, :] = poses[:, 20, :] # Copy Wrist to Hand
-            padding[:, 1, :] = poses[:, 21, :] 
+            padding[:, 0, :] = poses[:, 20, :] # L_Hand from L_Wrist
+            padding[:, 1, :] = poses[:, 21, :] # R_Hand from R_Wrist
             poses_final = torch.cat([poses, padding], dim=1)
         else:
             poses_final = poses
 
-        # 7. Pack Output
+        # Pack NLF Output
         joints_list = []
         for i in range(frames):
             frame_pose = poses_final[i].unsqueeze(0)
             joints_list.append(frame_pose)
-            
-        nlf_output = {
-            'joints3d_nonparam': [joints_list]
-        }
+        nlf_output = {'joints3d_nonparam': [joints_list]}
 
-        # 8. Dummy DWPose
-        dummy_bodies_candidate = np.zeros((1, 18, 2), dtype=np.float32) 
-        dummy_bodies_subset = np.zeros((1, 20), dtype=np.float32)
-        dummy_dw_list = []
-        for i in range(frames):
+        # --- 2. Generate Projected DWPose (With FACE) ---
+        
+        # Mapping SMPL(22) to OpenPose(18)
+        # SMPL: 0:Pelvis, 1:L_Hip, 2:R_Hip, 3:Spine1, 4:L_Knee, 5:R_Knee, 6:Spine2, 7:L_Ank, 8:R_Ank, 9:Spine3, 
+        #       10:L_Foot, 11:R_Foot, 12:Neck, 13:L_Collar, 14:R_Collar, 15:Head, 16:L_Sho, 17:R_Sho, 
+        #       18:L_Elb, 19:R_Elb, 20:L_Wri, 21:R_Wri
+        
+        # OpenPose 18: 0:Nose, 1:Neck, 2:RSho, 3:RElb, 4:RWri, 5:LSho, 6:LElb, 7:LWri, 
+        #              8:RHip, 9:RKnee, 10:RAnk, 11:LHip, 12:LKnee, 13:LAnk, 
+        #              14:REye, 15:LEye, 16:REar, 17:LEar
+        
+        # Simple pinhole projection
+        focal = max(width, height) # Approximate focal length
+        cx, cy = width / 2, height / 2
+        
+        def project(p3d):
+            # p3d: [..., 3] (x, y, z)
+            x, y, z = p3d[..., 0], p3d[..., 1], p3d[..., 2]
+            # Avoid div by zero
+            z = torch.clamp(z, min=10.0)
+            u = (x / z) * focal + cx
+            v = (y / z) * focal + cy
+            return torch.stack([u, v], dim=-1)
+
+        # Generate fake face points in 3D relative to Head(15)
+        # We assume poses is currently in Camera Space (Y-down, X-right)
+        # Head is roughly at center.
+        head_3d = poses[:, 15, :]
+        
+        # Define offsets (in mm)
+        face_scale = scale * 0.06 # Adjust based on body scale
+        
+        # Note: In screen view (viewer looking at screen):
+        # Right Eye (User's Right) is +X, Left Eye is -X. 
+        # But OpenPose defines R_Eye as the person's Right Eye.
+        # If person faces camera: Person's Right Eye is on Viewer's Left (-X).
+        
+        # 3D Offsets
+        off_nose   = torch.tensor([0.0, 0.0, -face_scale*0.5], device=poses.device) # Slightly forward (negative Z is closer)
+        off_r_eye  = torch.tensor([-face_scale*0.6, -face_scale*0.3, 0.0], device=poses.device)
+        off_l_eye  = torch.tensor([ face_scale*0.6, -face_scale*0.3, 0.0], device=poses.device)
+        off_r_ear  = torch.tensor([-face_scale*1.5, 0.0, face_scale*0.5], device=poses.device)
+        off_l_ear  = torch.tensor([ face_scale*1.5, 0.0, face_scale*0.5], device=poses.device)
+        
+        # Apply offsets to all frames
+        nose_3d = head_3d + off_nose
+        r_eye_3d = head_3d + off_r_eye
+        l_eye_3d = head_3d + off_l_eye
+        r_ear_3d = head_3d + off_r_ear
+        l_ear_3d = head_3d + off_l_ear
+        
+        # Construct full 18-point skeleton in 3D first
+        frames_cnt = poses.shape[0]
+        op_3d = torch.zeros((frames_cnt, 18, 3), device=poses.device)
+        
+        op_3d[:, 0] = nose_3d
+        op_3d[:, 1] = poses[:, 12] # Neck
+        op_3d[:, 2] = poses[:, 17] # R_Sho
+        op_3d[:, 3] = poses[:, 19] # R_Elb
+        op_3d[:, 4] = poses[:, 21] # R_Wri
+        op_3d[:, 5] = poses[:, 16] # L_Sho
+        op_3d[:, 6] = poses[:, 18] # L_Elb
+        op_3d[:, 7] = poses[:, 20] # L_Wri
+        op_3d[:, 8] = poses[:, 2]  # R_Hip
+        op_3d[:, 9] = poses[:, 5]  # R_Knee
+        op_3d[:, 10] = poses[:, 8] # R_Ank
+        op_3d[:, 11] = poses[:, 1] # L_Hip
+        op_3d[:, 12] = poses[:, 4] # L_Knee
+        op_3d[:, 13] = poses[:, 7] # L_Ank
+        op_3d[:, 14] = r_eye_3d
+        op_3d[:, 15] = l_eye_3d
+        op_3d[:, 16] = r_ear_3d
+        op_3d[:, 17] = l_ear_3d
+        
+        # Project to 2D
+        op_2d = project(op_3d) # [Frames, 18, 2] in pixels
+        
+        # Normalize to 0.0 - 1.0 (DWPose Standard)
+        op_2d[:, :, 0] /= width
+        op_2d[:, :, 1] /= height
+        
+        # Convert to numpy list structure for DWPose
+        op_2d_np = op_2d.cpu().numpy()
+        
+        dw_list = []
+        subset_base = np.arange(18, dtype=np.float32)
+        
+        for i in range(frames_cnt):
+            candidate = op_2d_np[i] # [18, 2]
+            
+            # Format: 'bodies': {'candidate': [N, 18, 2], 'subset': [N, 18]}
+            # N=1 person
+            body_entry = {
+                'candidate': candidate[None, ...], # [1, 18, 2]
+                'subset': subset_base[None, ...]   # [1, 18]
+            }
+            
             frame_dict = {
-                'bodies': {'candidate': dummy_bodies_candidate, 'subset': dummy_bodies_subset},
-                'hands': np.zeros((1, 21, 2), dtype=np.float32),
+                'bodies': body_entry,
+                'hands': np.zeros((1, 21, 2), dtype=np.float32), # Optional: could project hands too
                 'faces': np.zeros((1, 68, 2), dtype=np.float32),
                 'canvas_width': width,
                 'canvas_height': height
             }
-            dummy_dw_list.append(frame_dict)
+            dw_list.append(frame_dict)
             
-        dummy_dw_poses = {"poses": dummy_dw_list, "swap_hands": False}
+        dummy_dw_poses = {"poses": dw_list, "swap_hands": False}
         
         return (nlf_output, dummy_dw_poses)
 # ============================================================================
